@@ -1,11 +1,11 @@
 import os
 import glob
+import subprocess
 import win32com.client
 import win32gui
 import win32con
 import win32ui
 from PIL import Image
-from cameraTest import cameraStart
 
 EXCLUDE_KEYWORDS = [
     'uninstall', 'documentation', 'manual', 'release notes',
@@ -82,27 +82,5 @@ def get_app_icon(lnk_path, size=64):
         print(f"Error getting icon: {e}")
         return None, None
 
-# # test it
-# apps = get_installed_apps()
-# icon = get_app_icon(apps[0])
-# if icon:
-#     icon.save("test_icon.png")
-#     print("Icon saved!")
-# else:
-#     print("No icon found")
-
-# # load all apps and their icons
-# apps = get_installed_apps()
-
-# app_data = []
-# for app in apps:
-#     name = os.path.basename(app).replace('.lnk', '')
-#     icon = get_app_icon(app)
-#     app_data.append({
-#         'name': name,
-#         'path': app,
-#         'icon': icon
-#     })
-#     print(f"Loaded: {name}")
-
-# print(f"\nTotal apps loaded: {len(app_data)}")
+def launch_app(lnk_path):
+    subprocess.Popen(['cmd', '/c', 'start', '', lnk_path], shell= True)
