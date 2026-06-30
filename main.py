@@ -5,6 +5,8 @@ from appLauncher import get_installed_apps, get_app_icon, launch_app
 from handGesture import detect
 from cameraTest import cameraStart
 import math
+import time
+from windowManager import show_all_windows, select_choose_window, open_selected_window, hide_all_windows, close_focused_window
 
 # --- Layout constants ---
 COLS = 5
@@ -27,6 +29,16 @@ tilt_angle_buffer = []
 TILT_TRIGGER = 25
 TILT_REARM = 10
 BUFFER_SIZE = 5
+
+# --- Task View (3-finger) state ---
+task_view_open = False
+switch_armed = True
+last_switch_time = 0.0
+SWITCH_COOLDOWN = 1.0
+
+close_sign = True
+last_close_time = 0.0
+CLOSE_COOLDOWN = 1.0
 
 
 def load_apps():
@@ -110,6 +122,12 @@ def draw_page_indicator(frame):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
 
 
+def draw_task_view_indicator(frame):
+    cv2.putText(frame, "TASK VIEW: tilt = left/right, pinch = open, fist = close",
+                (10, frame.shape[0] - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
+
+
 def get_tilt_angle_from_results(results):
     """Extract tilt angle from already-detected hand world landmarks.
     Reuses the results returned by detect() — no second detector needed.
@@ -128,6 +146,7 @@ def get_tilt_angle_from_results(results):
 
 def processFrame(frame):
     global hovered_idx, pinch_armed, current_page, gesture_armed, tilt_angle_buffer
+    global task_view_open, switch_armed, last_switch_time, close_sign, last_close_time
 
     frame_h, frame_w = frame.shape[:2]
     gesture, points, results, frame = detect(frame)
@@ -168,25 +187,79 @@ def processFrame(frame):
         draw_cursor(frame, cursor_x, cursor_y)
         draw_page_indicator(frame)
 
-    # --- Pinch: launch hovered app ---
+    # --- Pinch: launch hovered app OR confirm Task View selection ---
     elif gesture == 'pinch':
-        draw_icons(frame)
-        draw_hover(frame, hovered_idx)
-        draw_page_indicator(frame)
-        if pinch_armed and hovered_idx != -1:
-            aps = get_apps_per_page()
-            app_path, _, app_name = app_icons[current_page * aps + hovered_idx]
-            print(f"Launching: {app_name}")
-            launch_app(app_path)
-            pinch_armed = False
+        if task_view_open:
+            draw_task_view_indicator(frame)
+            if pinch_armed:
+                open_selected_window()
+                task_view_open = False
+                pinch_armed = False
+        else:
+            draw_icons(frame)
+            draw_hover(frame, hovered_idx)
+            draw_page_indicator(frame)
+            if pinch_armed and hovered_idx != -1:
+                aps = get_apps_per_page()
+                app_path, _, app_name = app_icons[current_page * aps + hovered_idx]
+                print(f"Launching: {app_name}")
+                launch_app(app_path)
+                pinch_armed = False
 
-    # --- Fist: clear hover ---
+    # --- Fist: clear hover OR close Task View ---
     elif gesture == 'fist':
         hovered_idx = -1
+        if task_view_open:
+            hide_all_windows()
+            task_view_open = False
+
+    # --- Three fingers: open Task View + tilt to navigate left/right ---
+    elif gesture == 'three_Fingers':
+        if not task_view_open:
+            show_all_windows()
+            task_view_open = True
+
+        draw_task_view_indicator(frame)
+
+        angle = get_tilt_angle_from_results(results)
+        if angle is not None:
+            tilt_angle_buffer.append(angle)
+            if len(tilt_angle_buffer) > BUFFER_SIZE:
+                tilt_angle_buffer.pop(0)
+            smoothed = sum(tilt_angle_buffer) / len(tilt_angle_buffer)
+
+            now = time.time()
+            cooldown_ok = (now - last_switch_time) >= SWITCH_COOLDOWN
+
+            if switch_armed and cooldown_ok:
+                if smoothed > TILT_TRIGGER:
+                    select_choose_window('right')
+                    switch_armed = False
+                    last_switch_time = now
+                elif smoothed < -TILT_TRIGGER:
+                    select_choose_window('left')
+                    switch_armed = False
+                    last_switch_time = now
+            else:
+                if abs(smoothed) < TILT_REARM:
+                    switch_armed = True
+    elif gesture == 'four_Fingers':
+        now = time.time()
+        if close_sign and (now - last_close_time) >= CLOSE_COOLDOWN:
+            print('attempting alt f4')
+            close_focused_window()
+            last_close_time = now
+            close_sign = False
+    else:
+        close_sign = True
 
     # Re-arm pinch when not pinching
     if gesture != 'pinch':
         pinch_armed = True
+
+    # Re-arm tilt-switch when not showing three fingers
+    if gesture != 'three_Fingers':
+        switch_armed = True
 
     cv2.imshow("preview", frame)
 
